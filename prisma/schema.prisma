@@ -1,0 +1,255 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Banco de dados para o Agente Z - Sistema de Memória Persistente
+// Armazena conversas, mensagens, tarefas e memórias contextuais
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USUÁRIOS
+// ============================================
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  avatar        String?
+  preferences   Json?    // Preferências do usuário (tema, idioma, etc.)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  conversations Conversation[]
+  tasks         Task[]
+  memories      Memory[]
+  sessions      Session[]
+  
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token        String   @unique
+  deviceInfo   String?  // Info do dispositivo (modelo, OS, etc.)
+  ipAddress    String?
+  userAgent    String?
+  isActive     Boolean  @default(true)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  lastAccessAt DateTime @default(now())
+  
+  @@map("sessions")
+}
+
+// ============================================
+// CONVERSAS E MENSAGENS
+// ============================================
+model Conversation {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String?  // Título gerado automaticamente ou pelo usuário
+  summary     String?  // Resumo da conversa gerado pelo AI
+  context     Json?    // Contexto adicional (metadata, tags, etc.)
+  isArchived  Boolean  @default(false)
+  isStarred   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  messages    Message[]
+  
+  @@index([userId])
+  @@index([createdAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String   // 'user', 'assistant', 'system'
+  content        String   // Conteúdo da mensagem
+  tokens         Int?     // Número de tokens usados
+  model          String?  // Modelo usado (ex: 'gpt-4', 'claude-3')
+  metadata       Json?    // Metadados (arquivos anexados, imagens, etc.)
+  createdAt      DateTime @default(now())
+  
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ============================================
+// TAREFAS
+// ============================================
+model Task {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  status      TaskStatus  @default(PENDING)
+  priority    TaskPriority @default(MEDIUM)
+  category    String?     // 'trabalho', 'pessoal', 'estudo', etc.
+  tags        String?     // Tags separadas por vírgula
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  // Relacionamento com conversa (opcional - se a tarefa foi criada durante uma conversa)
+  conversationId String?
+  
+  subtasks    SubTask[]
+  reminders   Reminder[]
+  
+  @@index([userId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+model SubTask {
+  id          String   @id @default(cuid())
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  title       String
+  isCompleted Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  
+  @@index([taskId])
+  @@map("subtasks")
+}
+
+model Reminder {
+  id          String   @id @default(cuid())
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  remindAt    DateTime
+  isSent      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  
+  @@index([taskId])
+  @@index([remindAt])
+  @@map("reminders")
+}
+
+// ============================================
+// MEMÓRIA DO AGENTE (Sistema de Memória Persistente)
+// ============================================
+model Memory {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        MemoryType
+  key         String?      // Chave para memórias chave-valor
+  content     String       // Conteúdo da memória
+  embedding   String?      // Embedding vetorial para busca semântica (JSON array)
+  importance  Int          @default(5) // 1-10, usado para priorização
+  accessCount Int          @default(0) // Quantas vezes foi acessado
+  metadata    Json?        // Metadados adicionais
+  expiresAt   DateTime?    // Para memórias temporárias
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  lastAccessAt DateTime    @default(now())
+  
+  // Referência à mensagem que gerou esta memória (opcional)
+  messageId   String?
+  
+  @@index([userId])
+  @@index([type])
+  @@index([key])
+  @@map("memories")
+}
+
+// ============================================
+// CONHECIMENTO PERSONALIZADO
+// ============================================
+model Knowledge {
+  id          String   @id @default(cuid())
+  userId      String?
+  title       String
+  content     String
+  source      String?  // URL, arquivo, ou origem do conhecimento
+  category    String?  // 'documento', 'url', 'nota', etc.
+  embedding   String?  // Embedding vetorial para RAG
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([category])
+  @@map("knowledge")
+}
+
+// ============================================
+// AUDITORIA E LOGS
+// ============================================
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // Ação realizada
+  entity    String   // Entidade afetada (conversation, task, etc.)
+  entityId  String?  // ID da entidade
+  details   Json?    // Detalhes da ação
+  ipAddress String?
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// CONFIGURAÇÕES DO SISTEMA
+// ============================================
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  type      String   @default("string") // string, number, boolean, json
+  updatedAt DateTime @updatedAt
+  
+  @@map("settings")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ON_HOLD
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MemoryType {
+  CONVERSATION  // Memória de conversa
+  FACT          // Fato sobre o usuário
+  PREFERENCE    // Preferência do usuário
+  CONTEXT       // Contexto de trabalho atual
+  SKILL         // Habilidade ou conhecimento do usuário
+  RELATIONSHIP  // Relacionamento com outras pessoas
+  GOAL          // Meta ou objetivo do usuário
+  SCHEDULE      // Informação de agenda
+  NOTE          // Nota geral
+  EPISODIC      // Memória episódica (eventos específicos)
+}
